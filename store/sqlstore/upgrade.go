@@ -515,8 +515,7 @@ func UpgradeDatabaseToVersion55(sqlStore SqlStore) {
 }
 
 func UpgradeDatabaseToVersion56(sqlStore SqlStore) {
-	// TODO: Uncomment following condition when version 5.6.0 is released
-	//if shouldPerformUpgrade(sqlStore, VERSION_5_5_0, VERSION_5_6_0) {
+	// if shouldPerformUpgrade(sqlStore, VERSION_5_5_0, VERSION_5_6_0) {
 	sqlStore.CreateColumnIfNotExists("PluginKeyValueStore", "ExpireAt", "bigint(20)", "bigint", "0")
 
 	sqlStore.CreateIndexIfNotExists("idx_groupmembers_create_at", "GroupMembers", "CreateAt")
@@ -532,6 +531,6 @@ func UpgradeDatabaseToVersion56(sqlStore SqlStore) {
 		sqlStore.RemoveIndexIfExists("idx_users_firstname_lower", "lower(FirstName)")
 		sqlStore.RemoveIndexIfExists("idx_users_lastname_lower", "lower(LastName)")
 	}
-	//saveSchemaVersion(sqlStore, VERSION_5_6_0)
-	//}
+	saveSchemaVersion(sqlStore, VERSION_5_6_0)
+	// }
 }

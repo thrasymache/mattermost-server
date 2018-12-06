@@ -67,7 +67,9 @@ func createPost(c *Context, w http.ResponseWriter, r *http.Request) {
 	c.App.UpdateLastActivityAtIfNeeded(c.Session)
 
 	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte(c.App.PreparePostForClient(rp).ToJson()))
+
+	// Note that rp has already had PreparePostForClient called on it by App.CreatePost
+	w.Write([]byte(rp.ToJson()))
 }
 
 func createEphemeralPost(c *Context, w http.ResponseWriter, r *http.Request) {
@@ -526,7 +528,7 @@ func getFileInfosForPost(c *Context, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	infos, err := c.App.GetFileInfosForPost(c.Params.PostId, false)
+	infos, err := c.App.GetFileInfosForPostWithMigration(c.Params.PostId)
 	if err != nil {
 		c.Err = err
 		return
