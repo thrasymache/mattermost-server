@@ -519,7 +519,7 @@ func UpgradeDatabaseToVersion56(sqlStore SqlStore) {
 	sqlStore.CreateColumnIfNotExists("PluginKeyValueStore", "ExpireAt", "bigint(20)", "bigint", "0")
 
 	sqlStore.CreateIndexIfNotExists("idx_groupmembers_create_at", "GroupMembers", "CreateAt")
-	sqlStore.CreateIndexIfNotExists("idx_groups_remote_id", "Groups", "RemoteId")
+	sqlStore.CreateIndexIfNotExists("idx_groups_remote_id", "UserGroups", "RemoteId")
 
 	// migrating user's accepted terms of service data into the new table
 	sqlStore.GetMaster().Exec("INSERT INTO UserTermsOfService SELECT Id, AcceptedTermsOfServiceId as TermsOfServiceId, :CreateAt FROM Users WHERE AcceptedTermsOfServiceId != \"\" AND AcceptedTermsOfServiceId IS NOT NULL", map[string]interface{}{"CreateAt": model.GetMillis()})
