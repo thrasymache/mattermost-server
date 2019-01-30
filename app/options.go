@@ -4,6 +4,7 @@
 package app
 
 import (
+	"github.com/mattermost/mattermost-server/config"
 	"github.com/mattermost/mattermost-server/store"
 )
 
@@ -32,7 +33,10 @@ func StoreOverride(override interface{}) Option {
 
 func ConfigFile(file string) Option {
 	return func(s *Server) {
-		s.configFile = file
+		configStore, err := config.NewFileStore(file)
+		if err != nil {
+			panic("failed to apply ConfigFile option: " + err.Error())
+		}
 	}
 }
 
@@ -53,7 +57,8 @@ func StartElasticsearch(s *Server) {
 }
 
 func DisableConfigWatch(s *Server) {
-	s.disableConfigWatch = true
+	// TODO: can we disable by default instead?
+	// s.configStore.DisableWatcher()
 }
 
 type AppOption func(a *App)
