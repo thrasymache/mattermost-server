@@ -170,31 +170,29 @@ func validateLdapFilter(cfg *model.Config, ldap einterfaces.LdapInterface) *mode
 	return ldap.ValidateFilter(*cfg.LdapSettings.UserFilter)
 }
 
-func (a *App) SaveConfig(cfg *model.Config, sendConfigChangeClusterMessage bool) *model.AppError {
-	oldCfg := a.Config()
-	cfg.SetDefaults()
-	a.Desanitize(cfg)
+func isAuthorizationError(err error) bool {
+	if err == nil {
+		return false
+	}
 
-	if err := cfg.IsValid(); err != nil {
+	type authorizationError interface {
+		IsAuthorizationError() bool
+	}
+
+	ae, ok := err.(authorizationError)
+	return ok && ae.IsAuthorizationError()
+}
+
+func (a *App) SaveConfig(newCfg *model.Config, sendConfigChangeClusterMessage bool) *model.AppError {
+	if err := validateLdapFilter(newCfg, a.Ldap); err != nil {
 		return err
 	}
 
-	if err := validateLdapFilter(cfg, a.Ldap); err != nil {
-		return err
+	if err := a.configStore.Set(newCfg); isAuthorizationError(err) {
+		return model.NewAppError("saveConfig", "ent.cluster.save_config.error", nil, err.Error(), http.StatusForbidden)
+	} else if err != nil {
+		return model.NewAppError("saveConfig", "ent.cluster.save_config.error", nil, err.Error(), http.StatusInternalServerError)
 	}
-
-	if *a.Config().ClusterSettings.Enable && *a.Config().ClusterSettings.ReadOnlyConfig {
-		return model.NewAppError("saveConfig", "ent.cluster.save_config.error", nil, "", http.StatusForbidden)
-	}
-
-	a.DisableConfigWatch()
-
-	a.UpdateConfig(func(update *model.Config) {
-		*update = *cfg
-	})
-	a.PersistConfig()
-	a.ReloadConfig()
-	a.EnableConfigWatch()
 
 	if a.Metrics != nil {
 		if *a.Config().MetricsSettings.Enable {
@@ -205,7 +203,7 @@ func (a *App) SaveConfig(cfg *model.Config, sendConfigChangeClusterMessage bool)
 	}
 
 	if a.Cluster != nil {
-		err := a.Cluster.ConfigChanged(cfg, oldCfg, sendConfigChangeClusterMessage)
+		err := a.Cluster.ConfigChanged(newCfg, oldCfg, sendConfigChangeClusterMessage)
 		if err != nil {
 			return err
 		}

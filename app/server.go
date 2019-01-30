@@ -96,8 +96,7 @@ type Server struct {
 	licenseListenerId       string
 	logListenerId           string
 	clusterLeaderListenerId string
-	disableConfigWatch      bool
-	configWatcher           *config.ConfigWatcher
+	configStore             config.Store
 	asymmetricSigningKey    *ecdsa.PrivateKey
 
 	pluginCommands     []*PluginCommand
@@ -137,7 +136,6 @@ func NewServer(options ...Option) (*Server, error) {
 	s := &Server{
 		goroutineExitSignal:     make(chan struct{}, 1),
 		RootRouter:              rootRouter,
-		configFile:              "config.json",
 		configListeners:         make(map[string]func(*model.Config, *model.Config)),
 		licenseListeners:        map[string]func(){},
 		sessionCache:            utils.NewLru(model.SESSION_CACHE_SIZE),
@@ -148,11 +146,14 @@ func NewServer(options ...Option) (*Server, error) {
 		option(s)
 	}
 
-	if err := s.LoadConfig(s.configFile); err != nil {
-		return nil, err
-	}
+	if s.configStore == nil {
+		configStore, err := config.NewFileStore("config.json")
+		if err != nil {
+			return nil, err
+		}
 
-	s.EnableConfigWatch()
+		s.configStore = configStore
+	}
 
 	// Initalize logging
 	s.Log = mlog.NewLogger(utils.MloggerConfigFromLoggerConfig(&s.Config().LogSettings))
@@ -321,7 +322,7 @@ func (s *Server) Shutdown() error {
 	s.RemoveConfigListener(s.configListenerId)
 	s.RemoveConfigListener(s.logListenerId)
 
-	s.DisableConfigWatch()
+	s.configStore.Close()
 
 	if s.Cluster != nil {
 		s.Cluster.StopInterNodeCommunication()

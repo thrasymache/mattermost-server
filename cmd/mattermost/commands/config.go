@@ -219,9 +219,6 @@ func configSetCmdF(command *cobra.Command, args []string) error {
 
 	// Update the config
 
-	// first disable the watchers
-	app.DisableConfigWatch()
-
 	// create the function to update config
 	oldConfig := app.Config()
 	newConfig := app.Config()
@@ -239,14 +236,8 @@ func configSetCmdF(command *cobra.Command, args []string) error {
 		return errors.New("Invalid locale configuration")
 	}
 
-	// make the changes persist
-	app.PersistConfig()
-
 	// reload config
 	app.ReloadConfig()
-
-	// Enable config watchers
-	app.EnableConfigWatch()
 
 	return nil
 }

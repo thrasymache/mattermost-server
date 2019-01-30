@@ -63,34 +63,9 @@ func (a *App) UpdateConfig(f func(*model.Config)) {
 	a.Srv.UpdateConfig(f)
 }
 
-func (a *App) PersistConfig() {
-	config.SaveConfig(a.ConfigFileName(), a.Config())
-}
-
-func (s *Server) LoadConfig(configFile string) *model.AppError {
-	old := s.Config()
-
-	cfg, configPath, envConfig, err := config.LoadConfig(configFile)
-	if err != nil {
-		return err
-	}
-	*cfg.ServiceSettings.SiteURL = strings.TrimRight(*cfg.ServiceSettings.SiteURL, "/")
-	s.config.Store(cfg)
-
-	s.configFile = configPath
-	s.envConfig = envConfig
-
-	s.InvokeConfigListeners(old, cfg)
-	return nil
-}
-
-func (a *App) LoadConfig(configFile string) *model.AppError {
-	return a.Srv.LoadConfig(configFile)
-}
-
 func (s *Server) ReloadConfig() *model.AppError {
 	debug.FreeOSMemory()
-	if err := s.LoadConfig(s.configFile); err != nil {
+	if err := s.configStore.Load(); err != nil {
 		return err
 	}
 	return nil
@@ -98,10 +73,6 @@ func (s *Server) ReloadConfig() *model.AppError {
 
 func (a *App) ReloadConfig() *model.AppError {
 	return a.Srv.ReloadConfig()
-}
-
-func (a *App) ConfigFileName() string {
-	return a.Srv.configFile
 }
 
 func (a *App) ClientConfig() map[string]string {
@@ -114,33 +85,6 @@ func (a *App) ClientConfigHash() string {
 
 func (a *App) LimitedClientConfig() map[string]string {
 	return a.Srv.limitedClientConfig
-}
-
-func (s *Server) EnableConfigWatch() {
-	if s.configWatcher == nil && !s.disableConfigWatch {
-		configWatcher, err := config.NewConfigWatcher(s.configFile, func() {
-			s.ReloadConfig()
-		})
-		if err != nil {
-			mlog.Error(fmt.Sprint(err))
-		}
-		s.configWatcher = configWatcher
-	}
-}
-
-func (a *App) EnableConfigWatch() {
-	a.Srv.EnableConfigWatch()
-}
-
-func (s *Server) DisableConfigWatch() {
-	if s.configWatcher != nil {
-		s.configWatcher.Close()
-		s.configWatcher = nil
-	}
-}
-
-func (a *App) DisableConfigWatch() {
-	a.Srv.DisableConfigWatch()
 }
 
 // Registers a function with a given to be called when the config is reloaded and may have changed. The function
@@ -302,51 +246,6 @@ func (a *App) regenerateClientConfig() {
 
 	clientConfigJSON, _ := json.Marshal(a.Srv.clientConfig)
 	a.Srv.clientConfigHash = fmt.Sprintf("%x", md5.Sum(clientConfigJSON))
-}
-
-func (a *App) Desanitize(cfg *model.Config) {
-	actual := a.Config()
-
-	if cfg.LdapSettings.BindPassword != nil && *cfg.LdapSettings.BindPassword == model.FAKE_SETTING {
-		*cfg.LdapSettings.BindPassword = *actual.LdapSettings.BindPassword
-	}
-
-	if *cfg.FileSettings.PublicLinkSalt == model.FAKE_SETTING {
-		*cfg.FileSettings.PublicLinkSalt = *actual.FileSettings.PublicLinkSalt
-	}
-	if *cfg.FileSettings.AmazonS3SecretAccessKey == model.FAKE_SETTING {
-		cfg.FileSettings.AmazonS3SecretAccessKey = actual.FileSettings.AmazonS3SecretAccessKey
-	}
-
-	if *cfg.EmailSettings.InviteSalt == model.FAKE_SETTING {
-		cfg.EmailSettings.InviteSalt = actual.EmailSettings.InviteSalt
-	}
-	if *cfg.EmailSettings.SMTPPassword == model.FAKE_SETTING {
-		cfg.EmailSettings.SMTPPassword = actual.EmailSettings.SMTPPassword
-	}
-
-	if *cfg.GitLabSettings.Secret == model.FAKE_SETTING {
-		*cfg.GitLabSettings.Secret = *actual.GitLabSettings.Secret
-	}
-
-	if *cfg.SqlSettings.DataSource == model.FAKE_SETTING {
-		*cfg.SqlSettings.DataSource = *actual.SqlSettings.DataSource
-	}
-	if *cfg.SqlSettings.AtRestEncryptKey == model.FAKE_SETTING {
-		cfg.SqlSettings.AtRestEncryptKey = actual.SqlSettings.AtRestEncryptKey
-	}
-
-	if *cfg.ElasticsearchSettings.Password == model.FAKE_SETTING {
-		*cfg.ElasticsearchSettings.Password = *actual.ElasticsearchSettings.Password
-	}
-
-	for i := range cfg.SqlSettings.DataSourceReplicas {
-		cfg.SqlSettings.DataSourceReplicas[i] = actual.SqlSettings.DataSourceReplicas[i]
-	}
-
-	for i := range cfg.SqlSettings.DataSourceSearchReplicas {
-		cfg.SqlSettings.DataSourceSearchReplicas[i] = actual.SqlSettings.DataSourceSearchReplicas[i]
-	}
 }
 
 func (a *App) GetCookieDomain() string {
