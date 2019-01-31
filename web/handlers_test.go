@@ -4,12 +4,16 @@
 package web
 
 import (
+	"io"
+	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/mattermost/mattermost-server/app"
 	"github.com/mattermost/mattermost-server/model"
+	"github.com/mattermost/mattermost-server/utils/fileutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -19,7 +23,25 @@ func handlerForHTTPErrors(c *Context, w http.ResponseWriter, r *http.Request) {
 }
 
 func TestHandlerServeHTTPErrors(t *testing.T) {
-	s, err := app.NewServer(app.StoreOverride(mainHelper.Store), app.DisableConfigWatch)
+	permConfig, err := os.Open(fileutils.FindConfigFile("config.json"))
+	if err != nil {
+		panic(err)
+	}
+	defer permConfig.Close()
+	tempConfig, err := ioutil.TempFile("", "")
+	if err != nil {
+		panic(err)
+	}
+	_, err = io.Copy(tempConfig, permConfig)
+	tempConfig.Close()
+	if err != nil {
+		panic(err)
+	}
+
+	options := []app.Option{app.ConfigFile(tempConfig.Name(), false)}
+	options = append(options, app.StoreOverride(mainHelper.Store))
+
+	s, err := app.NewServer(options...)
 	require.Nil(t, err)
 	defer s.Shutdown()
 
@@ -63,7 +85,25 @@ func handlerForHTTPSecureTransport(c *Context, w http.ResponseWriter, r *http.Re
 }
 
 func TestHandlerServeHTTPSecureTransport(t *testing.T) {
-	s, err := app.NewServer(app.StoreOverride(mainHelper.Store), app.DisableConfigWatch)
+	permConfig, err := os.Open(fileutils.FindConfigFile("config.json"))
+	if err != nil {
+		panic(err)
+	}
+	defer permConfig.Close()
+	tempConfig, err := ioutil.TempFile("", "")
+	if err != nil {
+		panic(err)
+	}
+	_, err = io.Copy(tempConfig, permConfig)
+	tempConfig.Close()
+	if err != nil {
+		panic(err)
+	}
+
+	options := []app.Option{app.ConfigFile(tempConfig.Name(), false)}
+	options = append(options, app.StoreOverride(mainHelper.Store))
+
+	s, err := app.NewServer(options...)
 	require.Nil(t, err)
 	defer s.Shutdown()
 

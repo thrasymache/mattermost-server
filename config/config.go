@@ -4,24 +4,14 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
-	"io/ioutil"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
-	"github.com/fsnotify/fsnotify"
-	"github.com/pkg/errors"
-
 	"net/http"
 
-	"github.com/mattermost/mattermost-server/mlog"
 	"github.com/mattermost/mattermost-server/model"
 	"github.com/mattermost/mattermost-server/utils"
-	"github.com/mattermost/mattermost-server/utils/fileutils"
 )
 
 var (
@@ -34,163 +24,43 @@ var (
 	)
 )
 
-func SaveConfig(fileName string, config *model.Config) *model.AppError {
-	b, err := json.MarshalIndent(config, "", "    ")
-	if err != nil {
-		return model.NewAppError("SaveConfig", "utils.config.save_config.saving.app_error",
-			map[string]interface{}{"Filename": fileName}, err.Error(), http.StatusBadRequest)
-	}
-
-	err = ioutil.WriteFile(fileName, b, 0644)
-	if err != nil {
-		return model.NewAppError("SaveConfig", "utils.config.save_config.saving.app_error",
-			map[string]interface{}{"Filename": fileName}, err.Error(), http.StatusInternalServerError)
-	}
-
-	return nil
-}
-
-type ConfigWatcher struct {
-	watcher *fsnotify.Watcher
-	close   chan struct{}
-	closed  chan struct{}
-}
-
-func NewConfigWatcher(cfgFileName string, f func()) (*ConfigWatcher, error) {
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to create config watcher for file: "+cfgFileName)
-	}
-
-	configFile := filepath.Clean(cfgFileName)
-	configDir, _ := filepath.Split(configFile)
-	watcher.Add(configDir)
-
-	ret := &ConfigWatcher{
-		watcher: watcher,
-		close:   make(chan struct{}),
-		closed:  make(chan struct{}),
-	}
-
-	go func() {
-		defer close(ret.closed)
-		defer watcher.Close()
-
-		for {
-			select {
-			case event := <-watcher.Events:
-				// we only care about the config file
-				if filepath.Clean(event.Name) == configFile {
-					if event.Op&fsnotify.Write == fsnotify.Write || event.Op&fsnotify.Create == fsnotify.Create {
-						mlog.Info(fmt.Sprintf("Config file watcher detected a change reloading %v", cfgFileName))
-
-						if _, _, configReadErr := ReadConfigFile(cfgFileName, true); configReadErr == nil {
-							f()
-						} else {
-							mlog.Error(fmt.Sprintf("Failed to read while watching config file at %v with err=%v", cfgFileName, configReadErr.Error()))
-						}
-					}
-				}
-			case err := <-watcher.Errors:
-				mlog.Error(fmt.Sprintf("Failed while watching config file at %v with err=%v", cfgFileName, err.Error()))
-			case <-ret.close:
-				return
-			}
-		}
-	}()
-
-	return ret, nil
-}
-
-func (w *ConfigWatcher) Close() {
-	close(w.close)
-	<-w.closed
-}
-
-// EnsureConfigFile will attempt to locate a config file with the given name. If it does not exist,
-// it will attempt to locate a default config file, and copy it to a file named fileName in the same
-// directory. In either case, the config file path is returned.
-func EnsureConfigFile(fileName string) (string, error) {
-	if configFile := fileutils.FindConfigFile(fileName); configFile != "" {
-		return configFile, nil
-	}
-	if defaultPath := fileutils.FindConfigFile("default.json"); defaultPath != "" {
-		destPath := filepath.Join(filepath.Dir(defaultPath), fileName)
-		src, err := os.Open(defaultPath)
-		if err != nil {
-			return "", err
-		}
-		defer src.Close()
-		dest, err := os.OpenFile(destPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
-		if err != nil {
-			return "", err
-		}
-		defer dest.Close()
-		if _, err := io.Copy(dest, src); err == nil {
-			return destPath, nil
-		}
-	}
-	return "", fmt.Errorf("no config file found")
-}
-
 // LoadConfig will try to search around for the corresponding config file.  It will search
 // /tmp/fileName then attempt ./config/fileName, then ../config/fileName and last it will look at
 // fileName.
-func LoadConfig(fileName string) (*model.Config, string, map[string]interface{}, *model.AppError) {
-	var configPath string
+// func LoadConfig(fileName string) (*model.Config, string, map[string]interface{}, *model.AppError) {
+// 	needSave := len(config.SqlSettings.AtRestEncryptKey) == 0 || len(*config.FileSettings.PublicLinkSalt) == 0 ||
+// 		len(config.EmailSettings.InviteSalt) == 0
 
-	if fileName != filepath.Base(fileName) {
-		configPath = fileName
-	} else {
-		if path, err := EnsureConfigFile(fileName); err != nil {
-			appErr := model.NewAppError("LoadConfig", "utils.config.load_config.opening.panic", map[string]interface{}{"Filename": fileName, "Error": err.Error()}, "", 0)
-			return nil, "", nil, appErr
-		} else {
-			configPath = path
-		}
-	}
+// 	config.SetDefaults()
 
-	config, envConfig, err := ReadConfigFile(configPath, true)
-	if err != nil {
-		appErr := model.NewAppError("LoadConfig", "utils.config.load_config.decoding.panic", map[string]interface{}{"Filename": fileName, "Error": err.Error()}, "", 0)
-		return nil, "", nil, appErr
-	}
+// 	// Don't treat it as an error right now if custom terms of service are enabled but text is empty.
+// 	// This is because terms of service text will be fetched from database at a later state, but
+// 	// the flag indicating it is enabled is fetched from config file right away.
+// 	if err := config.IsValid(); err != nil && err.Id != termsOfServiceEnabledAndEmpty.Id {
+// 		return nil, "", nil, err
+// 	}
 
-	needSave := config.SqlSettings.AtRestEncryptKey == nil || len(*config.SqlSettings.AtRestEncryptKey) == 0 ||
-		config.FileSettings.PublicLinkSalt == nil || len(*config.FileSettings.PublicLinkSalt) == 0 ||
-		config.EmailSettings.InviteSalt == nil || len(*config.EmailSettings.InviteSalt) == 0
+// 	if needSave {
+// 		if err := SaveConfig(configPath, config); err != nil {
+// 			mlog.Warn(err.Error())
+// 		}
+// 	}
 
-	config.SetDefaults()
+// 	if err := ValidateLocales(config); err != nil {
+// 		if err := SaveConfig(configPath, config); err != nil {
+// 			mlog.Warn(err.Error())
+// 		}
+// 	}
 
-	// Don't treat it as an error right now if custom terms of service are enabled but text is empty.
-	// This is because terms of service text will be fetched from database at a later state, but
-	// the flag indicating it is enabled is fetched from config file right away.
-	if err := config.IsValid(); err != nil && err.Id != termsOfServiceEnabledAndEmpty.Id {
-		return nil, "", nil, err
-	}
+// 	if *config.FileSettings.DriverName == model.IMAGE_DRIVER_LOCAL {
+// 		dir := config.FileSettings.Directory
+// 		if len(dir) > 0 && dir[len(dir)-1:] != "/" {
+// 			config.FileSettings.Directory += "/"
+// 		}
+// 	}
 
-	if needSave {
-		if err := SaveConfig(configPath, config); err != nil {
-			mlog.Warn(err.Error())
-		}
-	}
-
-	if err := ValidateLocales(config); err != nil {
-		if err := SaveConfig(configPath, config); err != nil {
-			mlog.Warn(err.Error())
-		}
-	}
-
-	if *config.FileSettings.DriverName == model.IMAGE_DRIVER_LOCAL {
-		dir := config.FileSettings.Directory
-		dirString := *dir
-		if len(*dir) > 0 && dirString[len(dirString)-1:] != "/" {
-			*config.FileSettings.Directory += "/"
-		}
-	}
-
-	return config, configPath, envConfig, nil
-}
+// 	return config, configPath, envConfig, nil
+// }
 
 func GenerateClientConfig(c *model.Config, diagnosticId string, license *model.License) map[string]string {
 	props := GenerateLimitedClientConfig(c, diagnosticId, license)

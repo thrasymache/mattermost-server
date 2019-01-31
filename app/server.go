@@ -35,7 +35,6 @@ import (
 	"github.com/mattermost/mattermost-server/services/timezones"
 	"github.com/mattermost/mattermost-server/store"
 	"github.com/mattermost/mattermost-server/utils"
-	"github.com/mattermost/mattermost-server/utils/fileutils"
 )
 
 var MaxNotificationsPerChannelDefault int64 = 1000000
@@ -75,10 +74,6 @@ type Server struct {
 	runjobs bool
 	Jobs    *jobs.JobServer
 
-	config                 atomic.Value
-	envConfig              map[string]interface{}
-	configFile             string
-	configListeners        map[string]func(*model.Config, *model.Config)
 	clusterLeaderListeners sync.Map
 
 	licenseValue       atomic.Value
@@ -136,7 +131,6 @@ func NewServer(options ...Option) (*Server, error) {
 	s := &Server{
 		goroutineExitSignal:     make(chan struct{}, 1),
 		RootRouter:              rootRouter,
-		configListeners:         make(map[string]func(*model.Config, *model.Config)),
 		licenseListeners:        map[string]func(){},
 		sessionCache:            utils.NewLru(model.SESSION_CACHE_SIZE),
 		seenPendingPostIdsCache: utils.NewLru(PENDING_POST_IDS_CACHE_SIZE),
@@ -147,7 +141,7 @@ func NewServer(options ...Option) (*Server, error) {
 	}
 
 	if s.configStore == nil {
-		configStore, err := config.NewFileStore("config.json")
+		configStore, err := config.NewFileStore("config.json", true)
 		if err != nil {
 			return nil, err
 		}
@@ -197,7 +191,7 @@ func NewServer(options ...Option) (*Server, error) {
 	mlog.Info(fmt.Sprintf("Enterprise Enabled: %v", model.BuildEnterpriseReady))
 	pwd, _ := os.Getwd()
 	mlog.Info(fmt.Sprintf("Current working directory is %v", pwd))
-	mlog.Info(fmt.Sprintf("Loaded config file from %v", fileutils.FindConfigFile(s.configFile)))
+	mlog.Info("Loaded config", mlog.String("source", s.configStore.String()))
 
 	license := s.License()
 

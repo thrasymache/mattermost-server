@@ -15,7 +15,6 @@ import (
 	"net/url"
 	"runtime/debug"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/mattermost/mattermost-server/config"
@@ -29,10 +28,7 @@ const (
 )
 
 func (s *Server) Config() *model.Config {
-	if cfg := s.config.Load(); cfg != nil {
-		return cfg.(*model.Config)
-	}
-	return &model.Config{}
+	return s.configStore.Get()
 }
 
 func (a *App) Config() *model.Config {
@@ -40,10 +36,7 @@ func (a *App) Config() *model.Config {
 }
 
 func (s *Server) EnvironmentConfig() map[string]interface{} {
-	if s.envConfig != nil {
-		return s.envConfig
-	}
-	return map[string]interface{}{}
+	return s.configStore.GetEnvironmentOverrides()
 }
 
 func (a *App) EnvironmentConfig() map[string]interface{} {
@@ -54,16 +47,14 @@ func (s *Server) UpdateConfig(f func(*model.Config)) {
 	old := s.Config()
 	updated := old.Clone()
 	f(updated)
-	s.config.Store(updated)
-
-	s.InvokeConfigListeners(old, updated)
+	s.configStore.Set(updated)
 }
 
 func (a *App) UpdateConfig(f func(*model.Config)) {
 	a.Srv.UpdateConfig(f)
 }
 
-func (s *Server) ReloadConfig() *model.AppError {
+func (s *Server) ReloadConfig() error {
 	debug.FreeOSMemory()
 	if err := s.configStore.Load(); err != nil {
 		return err
@@ -71,7 +62,7 @@ func (s *Server) ReloadConfig() *model.AppError {
 	return nil
 }
 
-func (a *App) ReloadConfig() *model.AppError {
+func (a *App) ReloadConfig() error {
 	return a.Srv.ReloadConfig()
 }
 
@@ -91,9 +82,7 @@ func (a *App) LimitedClientConfig() map[string]string {
 // will be called with two arguments: the old config and the new config. AddConfigListener returns a unique ID
 // for the listener that can later be used to remove it.
 func (s *Server) AddConfigListener(listener func(*model.Config, *model.Config)) string {
-	id := model.NewId()
-	s.configListeners[id] = listener
-	return id
+	return s.configStore.AddListener(listener)
 }
 
 func (a *App) AddConfigListener(listener func(*model.Config, *model.Config)) string {
@@ -102,17 +91,11 @@ func (a *App) AddConfigListener(listener func(*model.Config, *model.Config)) str
 
 // Removes a listener function by the unique ID returned when AddConfigListener was called
 func (s *Server) RemoveConfigListener(id string) {
-	delete(s.configListeners, id)
+	s.configStore.RemoveListener(id)
 }
 
 func (a *App) RemoveConfigListener(id string) {
 	a.Srv.RemoveConfigListener(id)
-}
-
-func (s *Server) InvokeConfigListeners(old, current *model.Config) {
-	for _, listener := range s.configListeners {
-		listener(old, current)
-	}
 }
 
 // EnsureAsymmetricSigningKey ensures that an asymmetric signing key exists and future calls to

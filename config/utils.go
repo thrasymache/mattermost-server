@@ -12,25 +12,25 @@ func desanitize(actualCfg, newCfg *model.Config) {
 	if *newCfg.FileSettings.PublicLinkSalt == model.FAKE_SETTING {
 		*newCfg.FileSettings.PublicLinkSalt = *actualCfg.FileSettings.PublicLinkSalt
 	}
-	if newCfg.FileSettings.AmazonS3SecretAccessKey == model.FAKE_SETTING {
+	if *newCfg.FileSettings.AmazonS3SecretAccessKey == model.FAKE_SETTING {
 		newCfg.FileSettings.AmazonS3SecretAccessKey = actualCfg.FileSettings.AmazonS3SecretAccessKey
 	}
 
-	if newCfg.EmailSettings.InviteSalt == model.FAKE_SETTING {
+	if *newCfg.EmailSettings.InviteSalt == model.FAKE_SETTING {
 		newCfg.EmailSettings.InviteSalt = actualCfg.EmailSettings.InviteSalt
 	}
-	if newCfg.EmailSettings.SMTPPassword == model.FAKE_SETTING {
+	if *newCfg.EmailSettings.SMTPPassword == model.FAKE_SETTING {
 		newCfg.EmailSettings.SMTPPassword = actualCfg.EmailSettings.SMTPPassword
 	}
 
-	if newCfg.GitLabSettings.Secret == model.FAKE_SETTING {
+	if *newCfg.GitLabSettings.Secret == model.FAKE_SETTING {
 		newCfg.GitLabSettings.Secret = actualCfg.GitLabSettings.Secret
 	}
 
 	if *newCfg.SqlSettings.DataSource == model.FAKE_SETTING {
 		*newCfg.SqlSettings.DataSource = *actualCfg.SqlSettings.DataSource
 	}
-	if newCfg.SqlSettings.AtRestEncryptKey == model.FAKE_SETTING {
+	if *newCfg.SqlSettings.AtRestEncryptKey == model.FAKE_SETTING {
 		newCfg.SqlSettings.AtRestEncryptKey = actualCfg.SqlSettings.AtRestEncryptKey
 	}
 

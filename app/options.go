@@ -31,12 +31,14 @@ func StoreOverride(override interface{}) Option {
 	}
 }
 
-func ConfigFile(file string) Option {
+func ConfigFile(file string, watch bool) Option {
 	return func(s *Server) {
-		configStore, err := config.NewFileStore(file)
+		configStore, err := config.NewFileStore(file, watch)
 		if err != nil {
 			panic("failed to apply ConfigFile option: " + err.Error())
 		}
+
+		s.configStore = configStore
 	}
 }
 
@@ -54,11 +56,6 @@ func StartMetrics(s *Server) {
 
 func StartElasticsearch(s *Server) {
 	s.startElasticsearch = true
-}
-
-func DisableConfigWatch(s *Server) {
-	// TODO: can we disable by default instead?
-	// s.configStore.DisableWatcher()
 }
 
 type AppOption func(a *App)

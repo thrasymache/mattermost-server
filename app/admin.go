@@ -188,7 +188,8 @@ func (a *App) SaveConfig(newCfg *model.Config, sendConfigChangeClusterMessage bo
 		return err
 	}
 
-	if err := a.configStore.Set(newCfg); isAuthorizationError(err) {
+	oldCfg, err := a.Srv.configStore.Set(newCfg)
+	if isAuthorizationError(err) {
 		return model.NewAppError("saveConfig", "ent.cluster.save_config.error", nil, err.Error(), http.StatusForbidden)
 	} else if err != nil {
 		return model.NewAppError("saveConfig", "ent.cluster.save_config.error", nil, err.Error(), http.StatusInternalServerError)

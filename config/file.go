@@ -1,8 +1,10 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -25,35 +27,42 @@ var (
 
 // TODO: config watch, enable, disable, callbacks
 type fileStore struct {
+	emitter
+
 	config               *model.Config
 	environmentOverrides map[string]interface{}
 	path                 string
-	disableWatcher       bool
-	watcher              *ConfigWatcher
+	watch                bool
+	watcher              *watcher
+	needsSave            bool
 }
 
-func NewFileStore(path string) (*fileStore, error) {
-	var err error
-	path, err = resolveConfigFilePath(path)
+// NewFileStore creates a new instance of a config store backed by the given file path.
+func NewFileStore(path string, watch bool) (*fileStore, error) {
+	resolvedPath, err := resolveConfigFilePath(path)
 	if err != nil {
 		return nil, err
 	}
 
 	fs := &fileStore{
-		path:           path,
-		disableWatcher: false,
+		path:  resolvedPath,
+		watch: watch,
 	}
 	if err = fs.Load(); err != nil {
 		return nil, err
 	}
 
+	if fs.watch {
+		fs.startWatcher()
+	}
+
 	return fs, nil
 }
 
-// resolveConfigFilePath attempts to resolve the given path to a configuration file to an absolute path.
+// resolveConfigFilePath attempts to resolve an absolute path to the given configuration file path.
 //
 // Considerations include backwards compatibility when searching for configuration files from the
-// myriad of supported inputs in various versions to date.
+// myriad of supported input styles in various releases to date.
 func resolveConfigFilePath(path string) (string, error) {
 	// Absolute paths are explicit and require no resolution.
 	if !filepath.IsAbs(path) {
@@ -61,12 +70,13 @@ func resolveConfigFilePath(path string) (string, error) {
 	}
 
 	// Search for the given relative path or filename in various directories, resolving to the
-	// absolute path if found.
+	// corresponding absolute path if found.
 	if configFile := fileutils.FindConfigFile(path); configFile != "" {
 		return configFile, nil
 	}
 
-	// Otherwise, search for the config/ folder and build an absolute path anchored there.
+	// Otherwise, search for the config/ folder and build an absolute path anchored there and
+	// joining the given input path.
 	if configFolder, found := fileutils.FindDir("config"); found {
 		return filepath.Join(configFolder, path), nil
 	}
@@ -76,75 +86,19 @@ func resolveConfigFilePath(path string) (string, error) {
 	return "", fmt.Errorf("failed to resolve config file path from %s", path)
 }
 
-func (s *fileStore) Get() *model.Config {
-	return s.config
+// Get fetches the current configuration.
+func (fs *fileStore) Get() *model.Config {
+	return fs.config
 }
 
-func (s *fileStore) startWatcher() error {
-	if s.watcher != nil {
-		return nil
-	}
-
-	/*
-		if s.disableWatcher {
-			return nil
-		}
-	*/
-
-	watcher, err := NewConfigWatcher(s.path, func() {
-		// s.ReloadConfig()
-	})
-	if err != nil {
-		return err
-	}
-
-	s.watcher = watcher
-	return nil
+// GetEnvironmentOverrides fetches the configuration fields overridden by environment variables.
+func (fs *fileStore) GetEnvironmentOverrides() map[string]interface{} {
+	return fs.environmentOverrides
 }
 
-func (s *fileStore) stopWatcher() {
-	if s.watcher != nil {
-		s.watcher.Close()
-		s.watcher = nil
-	}
-}
-
-// TODO: EnableWatcher?
-func (s *fileStore) DisableWatcher() {
-	s.disableWatcher = false
-	s.stopWatcher()
-}
-
-func (s *fileStore) Load() error {
-	f, err := os.Open(s.path)
-	if err != nil {
-		return errors.Wrapf(err, "failed to open %s for reading", s.path)
-	}
-	defer f.Close()
-
-	allowEnvironmentOverrides := true
-	loadedCfg, environmentOverrides, err := readConfig(f, allowEnvironmentOverrides)
-	if err != nil {
-		return errors.Wrapf(err, "failed to load config from %s", s.path)
-	}
-
-	// TODO: Move this out?
-	*loadedCfg.ServiceSettings.SiteURL = strings.TrimRight(*loadedCfg.ServiceSettings.SiteURL, "/")
-
-	oldCfg := s.config
-	s.config = loadedCfg
-	s.environmentOverrides = environmentOverrides
-	s.invokeConfigListeners(oldCfg, loadedCfg)
-
-	return nil
-}
-
-func (s *fileStore) invokeConfigListeners(oldCfg, newCfg *model.Config) error {
-	return nil
-}
-
-func (s *fileStore) Set(newCfg *model.Config) error {
-	oldCfg := s.Get()
+// Set replaces the current configuration in its entirety.
+func (fs *fileStore) Set(newCfg *model.Config) (*model.Config, error) {
+	oldCfg := fs.Get()
 
 	newCfg.SetDefaults()
 
@@ -153,40 +107,137 @@ func (s *fileStore) Set(newCfg *model.Config) error {
 	desanitize(oldCfg, newCfg)
 
 	if err := newCfg.IsValid(); err != nil {
-		return errors.Wrap(err, "new configuration is invalid")
+		return nil, errors.Wrap(err, "new configuration is invalid")
 	}
 
 	if *oldCfg.ClusterSettings.Enable && *oldCfg.ClusterSettings.ReadOnlyConfig {
-		return authorizationError("configuration is read-only")
+		return nil, authorizationError("configuration is read-only")
 	}
 
-	if err := s.persist(newCfg); err != nil {
-		return errors.Wrap(err, "failed to persist")
+	if err := fs.persist(newCfg); err != nil {
+		return nil, errors.Wrap(err, "failed to persist")
 	}
 
-	return nil
+	go func() {
+		fs.invokeConfigListeners(oldCfg, newCfg)
+	}()
+
+	return oldCfg, nil
 }
 
-func (s *fileStore) persist(newCfg *model.Config) error {
-	s.stopWatcher()
+// Patch merges the given config with the current configuration.
+func (fs *fileStore) Patch(*model.Config) (*model.Config, error) {
+	// TODO
+	return fs.config, nil
+}
 
-	b, err := json.MarshalIndent(newCfg, "", "    ")
+// serialize converts the given configuration into JSON bytes for persistence.
+func (fs *fileStore) serialize(cfg *model.Config) ([]byte, error) {
+	b, err := json.MarshalIndent(cfg, "", "    ")
 	if err != nil {
-		return errors.Wrap(err, "failed to marshal")
+		return nil, errors.Wrap(err, "failed to marshal")
 	}
 
-	err = ioutil.WriteFile(s.path, b, 0644)
+	return b, nil
+}
+
+// persist writes the configuration to the configured file.
+func (fs *fileStore) persist(cfg *model.Config) error {
+	fs.stopWatcher()
+
+	b, err := fs.serialize(cfg)
+	if err != nil {
+		return errors.Wrap(err, "failed to serialize")
+	}
+
+	err = ioutil.WriteFile(fs.path, b, 0644)
 	if err != nil {
 		return errors.Wrap(err, "failed to write file")
 	}
 
-	if !s.disableWatcher {
-		s.startWatcher()
+	if fs.watch {
+		fs.startWatcher()
 	}
 
 	return nil
 }
 
-func (s *fileStore) Close() error {
+// Load updates the current configuration from the backing store.
+func (fs *fileStore) Load() error {
+	var f io.ReadCloser
+	var err error
+
+	f, err = os.Open(fs.path)
+	if os.IsNotExist(err) {
+		fs.needsSave = true
+		defaultCfg := model.Config{}
+		defaultCfg.SetDefaults()
+
+		defaultCfgBytes, err := fs.serialize(&defaultCfg)
+		if err != nil {
+			return errors.Wrap(err, "failed to serialize default config")
+		}
+
+		f = ioutil.NopCloser(bytes.NewReader(defaultCfgBytes))
+
+	} else if err != nil {
+		return errors.Wrapf(err, "failed to open %s for reading", fs.path)
+	}
+	defer f.Close()
+
+	allowEnvironmentOverrides := true
+	loadedCfg, environmentOverrides, err := readConfig(f, allowEnvironmentOverrides)
+	if err != nil {
+		return errors.Wrapf(err, "failed to load config from %s", fs.path)
+	}
+
+	// TODO: Move this out?
+	*loadedCfg.ServiceSettings.SiteURL = strings.TrimRight(*loadedCfg.ServiceSettings.SiteURL, "/")
+
+	oldCfg := fs.config
+	fs.config = loadedCfg
+	fs.environmentOverrides = environmentOverrides
+	fs.invokeConfigListeners(oldCfg, loadedCfg)
+
+	return nil
+}
+
+// startWatcher starts a watcher to monitor for external config file changes.
+func (fs *fileStore) startWatcher() error {
+	if fs.watcher != nil {
+		return nil
+	}
+
+	watcher, err := newWatcher(fs.path, func() {
+		fs.Load()
+	})
+	if err != nil {
+		return err
+	}
+
+	fs.watcher = watcher
+
+	return nil
+}
+
+// stopWatcher stops any previously started watcher.
+func (fs *fileStore) stopWatcher() {
+	if fs.watcher == nil {
+		return
+	}
+
+	fs.watcher.Close()
+	fs.watcher = nil
+}
+
+// String returns the path to the file backing the config.
+func (fs *fileStore) String() string {
+	return "file://" + fs.path
+}
+
+// Close cleans up resources associated with the store.
+func (fs *fileStore) Close() error {
+	fs.stopWatcher()
+
 	return nil
 }
