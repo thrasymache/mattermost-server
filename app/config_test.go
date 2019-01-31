@@ -42,7 +42,7 @@ import (
 // 	appErr := a.LoadConfig(tempConfig.Name())
 // 	require.Nil(t, appErr)
 
-// 	assert.Equal(t, "http://localhost:8065", *a.GetConfig().ServiceSettings.SiteURL)
+// 	assert.Equal(t, "http://localhost:8065", *a.Config().ServiceSettings.SiteURL)
 // }
 
 func TestConfigListener(t *testing.T) {

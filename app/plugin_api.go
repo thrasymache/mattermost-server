@@ -77,7 +77,10 @@ func (api *PluginAPI) GetSession(sessionId string) (*model.Session, *model.AppEr
 }
 
 func (api *PluginAPI) GetConfig() *model.Config {
-	return api.app.GetConfig()
+	cfg := api.app.Config().Clone()
+	cfg.Sanitize()
+
+	return cfg
 }
 
 func (api *PluginAPI) SaveConfig(config *model.Config) *model.AppError {
@@ -85,7 +88,7 @@ func (api *PluginAPI) SaveConfig(config *model.Config) *model.AppError {
 }
 
 func (api *PluginAPI) GetPluginConfig() map[string]interface{} {
-	cfg := api.app.GetConfig()
+	cfg := api.GetConfig()
 	if pluginConfig, isOk := cfg.PluginSettings.Plugins[api.manifest.Id]; isOk {
 		return pluginConfig
 	}
@@ -93,7 +96,7 @@ func (api *PluginAPI) GetPluginConfig() map[string]interface{} {
 }
 
 func (api *PluginAPI) SavePluginConfig(pluginConfig map[string]interface{}) *model.AppError {
-	cfg := api.app.GetConfig()
+	cfg := api.GetConfig()
 	cfg.PluginSettings.Plugins[api.manifest.Id] = pluginConfig
 	return api.app.SaveConfig(cfg, true)
 }

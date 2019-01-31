@@ -6,7 +6,6 @@ package app
 import (
 	"io"
 	"os"
-	"strings"
 	"time"
 
 	"runtime/debug"
@@ -148,14 +147,6 @@ func (a *App) InvalidateAllCachesSkipSend() {
 	a.Srv.Store.FileInfo().ClearCaches()
 	a.Srv.Store.Webhook().ClearCaches()
 	a.LoadLicense()
-}
-
-func (a *App) GetConfig() *model.Config {
-	json := a.Config().ToJson()
-	cfg := model.ConfigFromJson(strings.NewReader(json))
-	cfg.Sanitize()
-
-	return cfg
 }
 
 func (a *App) GetEnvironmentConfig() map[string]interface{} {
