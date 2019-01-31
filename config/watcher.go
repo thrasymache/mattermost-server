@@ -30,8 +30,8 @@ func newWatcher(path string, callback func()) (w *watcher, err error) {
 	// Watch the entire containing directory.
 	configDir, _ := filepath.Split(path)
 	if err := fsWatcher.Add(configDir); err != nil {
-		if err := fsWatcher.Close(); err != nil {
-			mlog.Error("failed to stop fsnotify watcher for %s", mlog.String("path", path))
+		if closeErr := fsWatcher.Close(); closeErr != nil {
+			mlog.Error("failed to stop fsnotify watcher for %s", mlog.String("path", path), mlog.Err(closeErr))
 		}
 		return nil, errors.Wrapf(err, "failed to watch directory %s", configDir)
 	}

@@ -8,7 +8,6 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/pkg/errors"
 
@@ -189,7 +188,8 @@ func (fs *fileStore) Load() (err error) {
 		defaultCfg := model.Config{}
 		defaultCfg.SetDefaults()
 
-		defaultCfgBytes, err := fs.serialize(&defaultCfg)
+		var defaultCfgBytes []byte
+		defaultCfgBytes, err = fs.serialize(&defaultCfg)
 		if err != nil {
 			return errors.Wrap(err, "failed to serialize default config")
 		}
