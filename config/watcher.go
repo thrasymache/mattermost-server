@@ -19,27 +19,36 @@ type watcher struct {
 }
 
 // newWatcher creates a new instance of watcher to monitor for file changes.
-func newWatcher(path string, callback func()) (*watcher, error) {
+func newWatcher(path string, callback func()) (w *watcher, err error) {
 	fsWatcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to create watcher for %s", path)
+		return nil, errors.Wrapf(err, "failed to create fsnotify watcher for %s", path)
 	}
 
 	path = filepath.Clean(path)
 
 	// Watch the entire containing directory.
 	configDir, _ := filepath.Split(path)
-	fsWatcher.Add(configDir)
+	if err := fsWatcher.Add(configDir); err != nil {
+		if err := fsWatcher.Close(); err != nil {
+			mlog.Error("failed to stop fsnotify watcher for %s", mlog.String("path", path))
+		}
+		return nil, errors.Wrapf(err, "failed to watch directory %s", configDir)
+	}
 
-	ret := &watcher{
+	w = &watcher{
 		fsWatcher: fsWatcher,
 		close:     make(chan struct{}),
 		closed:    make(chan struct{}),
 	}
 
 	go func() {
-		defer close(ret.closed)
-		defer fsWatcher.Close()
+		defer close(w.closed)
+		defer func() {
+			if err := fsWatcher.Close(); err != nil {
+				mlog.Error("failed to stop fsnotify watcher for %s", mlog.String("path", path))
+			}
+		}()
 
 		for {
 			select {
@@ -53,13 +62,13 @@ func newWatcher(path string, callback func()) (*watcher, error) {
 				}
 			case err := <-fsWatcher.Errors:
 				mlog.Error("Failed while watching config file", mlog.String("path", path), mlog.Err(err))
-			case <-ret.close:
+			case <-w.close:
 				return
 			}
 		}
 	}()
 
-	return ret, nil
+	return w, nil
 }
 
 func (w *watcher) Close() error {

@@ -6,6 +6,7 @@ import (
 	"github.com/mattermost/mattermost-server/model"
 )
 
+// emitter enables threadsafe registration and broadcasting to configuration listeners
 type emitter struct {
 	listeners sync.Map
 }
@@ -25,13 +26,11 @@ func (e *emitter) RemoveListener(id string) {
 }
 
 // invokeConfigListeners synchronously notifies all listeners about the configuration change.
-func (e *emitter) invokeConfigListeners(oldCfg, newCfg *model.Config) error {
+func (e *emitter) invokeConfigListeners(oldCfg, newCfg *model.Config) {
 	e.listeners.Range(func(key, value interface{}) bool {
 		listener := value.(Listener)
 		listener(oldCfg, newCfg)
 
 		return true
 	})
-
-	return nil
 }

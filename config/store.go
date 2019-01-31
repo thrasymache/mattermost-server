@@ -4,11 +4,12 @@ import (
 	"github.com/mattermost/mattermost-server/model"
 )
 
+// Listener is a callback function invoked when the configuration changes.
 type Listener func(oldConfig *model.Config, newConfig *model.Config)
 
 // Store abstracts the act of getting and setting the configuration.
 type Store interface {
-	// Get fetches the current configuration.
+	// Get fetches the current, cached configuration.
 	Get() *model.Config
 
 	// GetEnvironmentOverrides fetches the configuration fields overridden by environment variables.
