@@ -25,6 +25,7 @@ var (
 	ReadOnlyConfigurationError = errors.New("configuration is read-only")
 )
 
+// fileStore is a config store backed by a file such as config/config.json.
 type fileStore struct {
 	emitter
 

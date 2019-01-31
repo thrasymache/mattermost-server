@@ -16,6 +16,37 @@ import (
 	"github.com/mattermost/mattermost-server/utils/jsonutils"
 )
 
+// newViper creates an instance of viper.Viper configured for parsing a configuration.
+func newViper(allowEnvironmentOverrides bool) *viper.Viper {
+	v := viper.New()
+
+	v.SetConfigType("json")
+
+	if allowEnvironmentOverrides {
+		v.SetEnvPrefix("mm")
+		v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+		v.AutomaticEnv()
+	}
+
+	// Set zeroed defaults for all the config settings so that Viper knows what environment variables
+	// it needs to be looking for. The correct defaults will later be applied using Config.SetDefaults.
+	defaults := getDefaultsFromStruct(model.Config{})
+
+	for key, value := range defaults {
+		if key == "PluginSettings.Plugins" || key == "PluginSettings.PluginStates" {
+			continue
+		}
+
+		v.SetDefault(key, value)
+	}
+
+	return v
+}
+
+func getDefaultsFromStruct(s interface{}) map[string]interface{} {
+	return flattenStructToMap(structToMap(reflect.TypeOf(s)))
+}
+
 // Converts a struct type into a nested map with keys matching the struct's fields and values
 // matching the zeroed value of the corresponding field.
 func structToMap(t reflect.Type) (out map[string]interface{}) {
@@ -90,36 +121,7 @@ func flattenStructToMap(in map[string]interface{}) map[string]interface{} {
 	return out
 }
 
-func getDefaultsFromStruct(s interface{}) map[string]interface{} {
-	return flattenStructToMap(structToMap(reflect.TypeOf(s)))
-}
-
-func newViper(allowEnvironmentOverrides bool) *viper.Viper {
-	v := viper.New()
-
-	v.SetConfigType("json")
-
-	if allowEnvironmentOverrides {
-		v.SetEnvPrefix("mm")
-		v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-		v.AutomaticEnv()
-	}
-
-	// Set zeroed defaults for all the config settings so that Viper knows what environment variables
-	// it needs to be looking for. The correct defaults will later be applied using Config.SetDefaults.
-	defaults := getDefaultsFromStruct(model.Config{})
-
-	for key, value := range defaults {
-		if key == "PluginSettings.Plugins" || key == "PluginSettings.PluginStates" {
-			continue
-		}
-
-		v.SetDefault(key, value)
-	}
-
-	return v
-}
-
+// readConfig unmarshals a raw configuration into a Config model and environment variable overrides.
 func readConfig(r io.Reader, allowEnvironmentOverrides bool) (*model.Config, map[string]interface{}, error) {
 	// Pre-flight check the syntax of the configuration file to improve error messaging.
 	configData, err := ioutil.ReadAll(r)
@@ -160,8 +162,8 @@ func readConfig(r io.Reader, allowEnvironmentOverrides bool) (*model.Config, map
 	return &config, envConfig, unmarshalErr
 }
 
-// Fixes the case of the environment variables sent back from Viper since Viper stores
-// everything as lower case.
+// Fixes the case of the environment variables sent back from Viper since Viper stores everything
+// as lower case.
 func fixEnvSettingsCase(in map[string]interface{}) (out map[string]interface{}, err error) {
 	defer func() {
 		if r := recover(); r != nil {
