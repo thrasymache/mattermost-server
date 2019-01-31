@@ -191,6 +191,8 @@ func (fs *fileStore) Load() error {
 		return errors.Wrapf(err, "failed to load config from %s", fs.path)
 	}
 
+	loadedCfg.SetDefaults()
+
 	// TODO: Move this out?
 	*loadedCfg.ServiceSettings.SiteURL = strings.TrimRight(*loadedCfg.ServiceSettings.SiteURL, "/")
 
