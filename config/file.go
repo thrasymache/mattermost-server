@@ -65,7 +65,7 @@ func NewFileStore(path string, watch bool) (*fileStore, error) {
 // myriad of supported input styles in various releases to date.
 func resolveConfigFilePath(path string) (string, error) {
 	// Absolute paths are explicit and require no resolution.
-	if !filepath.IsAbs(path) {
+	if filepath.IsAbs(path) {
 		return path, nil
 	}
 
