@@ -212,10 +212,22 @@ func (fs *fileStore) Load() (err error) {
 		return errors.Wrapf(err, "failed to load config from %s", fs.path)
 	}
 
+	// SetDefaults generates various keys and salts if not previously configured. Determine if
+	// such a change will be made before invoking. This method will not effect the save: that
+	// remains the responsibility of the caller.
+	fs.needsSave = fs.needsSave || loadedCfg.SqlSettings.AtRestEncryptKey == nil || len(*loadedCfg.SqlSettings.AtRestEncryptKey) == 0
+	fs.needsSave = fs.needsSave || loadedCfg.FileSettings.PublicLinkSalt == nil || len(*loadedCfg.FileSettings.PublicLinkSalt) == 0
+	fs.needsSave = fs.needsSave || loadedCfg.EmailSettings.InviteSalt == nil || len(*loadedCfg.EmailSettings.InviteSalt) == 0
+
 	loadedCfg.SetDefaults()
 
-	// TODO: Move this out?
-	*loadedCfg.ServiceSettings.SiteURL = strings.TrimRight(*loadedCfg.ServiceSettings.SiteURL, "/")
+	if err := loadedCfg.IsValid(); err != nil {
+		return errors.Wrap(err, "invalid config")
+	}
+
+	if changed := fixConfig(loadedCfg); changed {
+		fs.needsSave = true
+	}
 
 	oldCfg := fs.config
 	fs.config = loadedCfg
