@@ -141,12 +141,18 @@ func NewServer(options ...Option) (*Server, error) {
 	}
 
 	if s.configStore == nil {
-		configStore, err := config.NewFileStore("config.json", true)
+		configStore, needsSave, err := config.NewFileStore("config.json", true)
 		if err != nil {
-			return nil, err
+			return nil, errors.Wrap(err, "failed to load config")
 		}
 
 		s.configStore = configStore
+		if needsSave {
+			err = configStore.Save()
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to save config after load")
+			}
+		}
 	}
 
 	// Initalize logging
