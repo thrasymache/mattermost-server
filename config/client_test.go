@@ -109,6 +109,33 @@ func TestGetClientConfig(t *testing.T) {
 				"EnforceMultifactorAuthentication": "true",
 			},
 		},
+		{
+			"experimental channel organization enabled",
+			&model.Config{
+				ServiceSettings: model.ServiceSettings{
+					ExperimentalChannelOrganization: bToP(true),
+				},
+			},
+			"tag1",
+			nil,
+			map[string]string{
+				"ExperimentalChannelOrganization": "true",
+			},
+		},
+		{
+			"experimental channel organization disabled, but experimental group unread channels on",
+			&model.Config{
+				ServiceSettings: model.ServiceSettings{
+					ExperimentalChannelOrganization: bToP(false),
+					ExperimentalGroupUnreadChannels: sToP(model.GROUP_UNREAD_CHANNELS_DEFAULT_ON),
+				},
+			},
+			"tag1",
+			nil,
+			map[string]string{
+				"ExperimentalChannelOrganization": "true",
+			},
+		},
 	}
 
 	for _, testCase := range testCases {

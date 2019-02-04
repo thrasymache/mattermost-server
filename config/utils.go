@@ -43,10 +43,12 @@ func desanitize(actual, target *model.Config) {
 		*target.ElasticsearchSettings.Password = *actual.ElasticsearchSettings.Password
 	}
 
+	target.SqlSettings.DataSourceReplicas = make([]string, len(actual.SqlSettings.DataSourceReplicas))
 	for i := range target.SqlSettings.DataSourceReplicas {
 		target.SqlSettings.DataSourceReplicas[i] = actual.SqlSettings.DataSourceReplicas[i]
 	}
 
+	target.SqlSettings.DataSourceSearchReplicas = make([]string, len(actual.SqlSettings.DataSourceReplicas))
 	for i := range target.SqlSettings.DataSourceSearchReplicas {
 		target.SqlSettings.DataSourceSearchReplicas[i] = actual.SqlSettings.DataSourceSearchReplicas[i]
 	}
