@@ -21,8 +21,8 @@ type Store interface {
 	// Patch merges the given config with the current configuration.
 	Patch(*model.Config) (*model.Config, error)
 
-	// Load updates the current configuration from the backing store.
-	Load() error
+	// Load updates the current configuration from the backing store, possibly initializing.
+	Load() (needsSave bool, err error)
 
 	// AddListener adds a callback function to invoke when the configuration is modified.
 	AddListener(listener Listener) string

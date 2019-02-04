@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/pkg/errors"
 
@@ -15,11 +16,6 @@ import (
 	"github.com/mattermost/mattermost-server/model"
 	"github.com/mattermost/mattermost-server/utils/fileutils"
 )
-
-type authorizationError string
-
-func (e authorizationError) IsAuthorizationError() bool { return true }
-func (e authorizationError) Error() string              { return string(e) }
 
 var (
 	ReadOnlyConfigurationError = errors.New("configuration is read-only")
@@ -31,6 +27,7 @@ type fileStore struct {
 
 	config               *model.Config
 	environmentOverrides map[string]interface{}
+	configLock           sync.RWMutex
 	path                 string
 	watch                bool
 	watcher              *watcher
@@ -40,18 +37,18 @@ type fileStore struct {
 // NewFileStore creates a new instance of a config store backed by the given file path.
 //
 // If watch is true, any external changes to the file will force a reload.
-func NewFileStore(path string, watch bool) (*fileStore, error) {
+func NewFileStore(path string, watch bool) (fs *fileStore, needsSave bool, err error) {
 	resolvedPath, err := resolveConfigFilePath(path)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
-	fs := &fileStore{
+	fs = &fileStore{
 		path:  resolvedPath,
 		watch: watch,
 	}
-	if err = fs.Load(); err != nil {
-		return nil, err
+	if _, err = fs.Load(); err != nil {
+		return nil, false, err
 	}
 
 	if fs.watch {
@@ -60,7 +57,7 @@ func NewFileStore(path string, watch bool) (*fileStore, error) {
 		}
 	}
 
-	return fs, nil
+	return fs, fs.needsSave, nil
 }
 
 // resolveConfigFilePath attempts to resolve the given configuration file path to an absolute path.
@@ -94,16 +91,25 @@ func resolveConfigFilePath(path string) (string, error) {
 
 // Get fetches the current, cached configuration.
 func (fs *fileStore) Get() *model.Config {
+	fs.configLock.RLock()
+	defer fs.configLock.RUnlock()
+
 	return fs.config
 }
 
 // GetEnvironmentOverrides fetches the configuration fields overridden by environment variables.
 func (fs *fileStore) GetEnvironmentOverrides() map[string]interface{} {
+	fs.configLock.RLock()
+	defer fs.configLock.RUnlock()
+
 	return fs.environmentOverrides
 }
 
 // Set replaces the current configuration in its entirety.
 func (fs *fileStore) Set(newCfg *model.Config) (*model.Config, error) {
+	fs.configLock.Lock()
+	defer fs.configLock.Unlock()
+
 	oldCfg := fs.config
 
 	// Disallow attempting to save a directly modified config (comparing pointers). This is
@@ -124,7 +130,7 @@ func (fs *fileStore) Set(newCfg *model.Config) (*model.Config, error) {
 	}
 
 	if *oldCfg.ClusterSettings.Enable && *oldCfg.ClusterSettings.ReadOnlyConfig {
-		return nil, authorizationError("configuration is read-only")
+		return nil, ReadOnlyConfigurationError
 	}
 
 	if err := fs.persist(newCfg); err != nil {
@@ -142,18 +148,17 @@ func (fs *fileStore) Set(newCfg *model.Config) (*model.Config, error) {
 
 // Patch merges the given config with the current configuration.
 func (fs *fileStore) Patch(*model.Config) (*model.Config, error) {
-	// TODO
+	fs.configLock.Lock()
+	defer fs.configLock.Unlock()
+
+	panic("patch is not yet implemented")
+
 	return fs.config, nil
 }
 
 // serialize converts the given configuration into JSON bytes for persistence.
 func (fs *fileStore) serialize(cfg *model.Config) ([]byte, error) {
-	b, err := json.MarshalIndent(cfg, "", "    ")
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to marshal")
-	}
-
-	return b, nil
+	return json.MarshalIndent(cfg, "", "    ")
 }
 
 // persist writes the configuration to the configured file.
@@ -170,6 +175,7 @@ func (fs *fileStore) persist(cfg *model.Config) error {
 		return errors.Wrap(err, "failed to write file")
 	}
 
+	fs.needsSave = false
 	if fs.watch {
 		if err = fs.startWatcher(); err != nil {
 			mlog.Error("failed to start config watcher", mlog.String("path", fs.path), mlog.Err(err))
@@ -180,25 +186,25 @@ func (fs *fileStore) persist(cfg *model.Config) error {
 }
 
 // Load updates the current configuration from the backing store.
-func (fs *fileStore) Load() (err error) {
+func (fs *fileStore) Load() (needsSave bool, err error) {
 	var f io.ReadCloser
 
 	f, err = os.Open(fs.path)
 	if os.IsNotExist(err) {
-		fs.needsSave = true
+		needsSave = true
 		defaultCfg := model.Config{}
 		defaultCfg.SetDefaults()
 
 		var defaultCfgBytes []byte
 		defaultCfgBytes, err = fs.serialize(&defaultCfg)
 		if err != nil {
-			return errors.Wrap(err, "failed to serialize default config")
+			return false, errors.Wrap(err, "failed to serialize default config")
 		}
 
 		f = ioutil.NopCloser(bytes.NewReader(defaultCfgBytes))
 
 	} else if err != nil {
-		return errors.Wrapf(err, "failed to open %s for reading", fs.path)
+		return false, errors.Wrapf(err, "failed to open %s for reading", fs.path)
 	}
 	defer func() {
 		closeErr := f.Close()
@@ -210,32 +216,39 @@ func (fs *fileStore) Load() (err error) {
 	allowEnvironmentOverrides := true
 	loadedCfg, environmentOverrides, err := readConfig(f, allowEnvironmentOverrides)
 	if err != nil {
-		return errors.Wrapf(err, "failed to load config from %s", fs.path)
+		return false, errors.Wrapf(err, "failed to load config from %s", fs.path)
 	}
 
 	// SetDefaults generates various keys and salts if not previously configured. Determine if
 	// such a change will be made before invoking. This method will not effect the save: that
 	// remains the responsibility of the caller.
-	fs.needsSave = fs.needsSave || loadedCfg.SqlSettings.AtRestEncryptKey == nil || len(*loadedCfg.SqlSettings.AtRestEncryptKey) == 0
-	fs.needsSave = fs.needsSave || loadedCfg.FileSettings.PublicLinkSalt == nil || len(*loadedCfg.FileSettings.PublicLinkSalt) == 0
-	fs.needsSave = fs.needsSave || loadedCfg.EmailSettings.InviteSalt == nil || len(*loadedCfg.EmailSettings.InviteSalt) == 0
+	needsSave = needsSave || loadedCfg.SqlSettings.AtRestEncryptKey == nil || len(*loadedCfg.SqlSettings.AtRestEncryptKey) == 0
+	needsSave = needsSave || loadedCfg.FileSettings.PublicLinkSalt == nil || len(*loadedCfg.FileSettings.PublicLinkSalt) == 0
+	needsSave = needsSave || loadedCfg.EmailSettings.InviteSalt == nil || len(*loadedCfg.EmailSettings.InviteSalt) == 0
 
 	loadedCfg.SetDefaults()
 
 	if err := loadedCfg.IsValid(); err != nil {
-		return errors.Wrap(err, "invalid config")
+		return false, errors.Wrap(err, "invalid config")
 	}
 
 	if changed := fixConfig(loadedCfg); changed {
-		fs.needsSave = true
+		needsSave = true
 	}
 
+	fs.configLock.Lock()
+	defer fs.configLock.Unlock()
+
 	oldCfg := fs.config
+	fs.needsSave = needsSave
 	fs.config = loadedCfg
 	fs.environmentOverrides = environmentOverrides
-	fs.invokeConfigListeners(oldCfg, loadedCfg)
 
-	return nil
+	go func() {
+		fs.invokeConfigListeners(oldCfg, loadedCfg)
+	}()
+
+	return fs.needsSave, nil
 }
 
 // startWatcher starts a watcher to monitor for external config file changes.
@@ -245,7 +258,7 @@ func (fs *fileStore) startWatcher() error {
 	}
 
 	watcher, err := newWatcher(fs.path, func() {
-		if err := fs.Load(); err != nil {
+		if _, err := fs.Load(); err != nil {
 			mlog.Error("failed to reload file on change", mlog.String("path", fs.path), mlog.Err(err))
 		}
 	})
