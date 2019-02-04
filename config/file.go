@@ -108,7 +108,12 @@ func (fs *fileStore) GetEnvironmentOverrides() map[string]interface{} {
 // Set replaces the current configuration in its entirety.
 func (fs *fileStore) Set(newCfg *model.Config) (*model.Config, error) {
 	fs.configLock.Lock()
-	defer fs.configLock.Unlock()
+	var unlockOnce sync.Once
+	defer func() {
+		unlockOnce.Do(func() {
+			fs.configLock.Unlock()
+		})
+	}()
 
 	oldCfg := fs.config
 
@@ -139,9 +144,13 @@ func (fs *fileStore) Set(newCfg *model.Config) (*model.Config, error) {
 
 	fs.config = newCfg
 
-	go func() {
-		fs.invokeConfigListeners(oldCfg, newCfg)
-	}()
+	unlockOnce.Do(func() {
+		fs.configLock.Unlock()
+	})
+
+	// Notify listeners synchronously. Ideally, this would be asynchronous, but existing code
+	// assumes this and there would be increased complexity to avoid racing updates.
+	fs.invokeConfigListeners(oldCfg, newCfg)
 
 	return oldCfg, nil
 }
@@ -237,18 +246,27 @@ func (fs *fileStore) Load() (needsSave bool, err error) {
 	}
 
 	fs.configLock.Lock()
-	defer fs.configLock.Unlock()
 
 	oldCfg := fs.config
 	fs.needsSave = needsSave
 	fs.config = loadedCfg
 	fs.environmentOverrides = environmentOverrides
 
-	go func() {
-		fs.invokeConfigListeners(oldCfg, loadedCfg)
-	}()
+	fs.configLock.Unlock()
+
+	// Notify listeners synchronously. Ideally, this would be asynchronous, but existing code
+	// assumes this and there would be increased complexity to avoid racing updates.
+	fs.invokeConfigListeners(oldCfg, loadedCfg)
 
 	return fs.needsSave, nil
+}
+
+// Save writes the current configuration to the backing store.
+func (fs *fileStore) Save() error {
+	fs.configLock.RLock()
+	defer fs.configLock.RUnlock()
+
+	return fs.persist(fs.config)
 }
 
 // startWatcher starts a watcher to monitor for external config file changes.
