@@ -11,6 +11,10 @@ import (
 )
 
 func TestWatcherInvalidDirectory(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping watcher test in short mode")
+	}
+
 	tempDir := os.TempDir()
 	f, err := ioutil.TempFile(tempDir, "TestWatcher")
 	require.NoError(t, err)
@@ -21,6 +25,10 @@ func TestWatcherInvalidDirectory(t *testing.T) {
 }
 
 func TestWatcher(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping watcher test in short mode")
+	}
+
 	tempDir, err := ioutil.TempDir("", "TestWatcher")
 	require.NoError(t, err)
 	defer os.RemoveAll(tempDir)
