@@ -12,6 +12,7 @@ import (
 
 	"net/http"
 
+	"github.com/mattermost/mattermost-server/config"
 	"github.com/mattermost/mattermost-server/einterfaces"
 	"github.com/mattermost/mattermost-server/mlog"
 	"github.com/mattermost/mattermost-server/model"
@@ -161,26 +162,13 @@ func validateLdapFilter(cfg *model.Config, ldap einterfaces.LdapInterface) *mode
 	return ldap.ValidateFilter(*cfg.LdapSettings.UserFilter)
 }
 
-func isAuthorizationError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	type authorizationError interface {
-		IsAuthorizationError() bool
-	}
-
-	ae, ok := err.(authorizationError)
-	return ok && ae.IsAuthorizationError()
-}
-
 func (a *App) SaveConfig(newCfg *model.Config, sendConfigChangeClusterMessage bool) *model.AppError {
 	if err := validateLdapFilter(newCfg, a.Ldap); err != nil {
 		return err
 	}
 
 	oldCfg, err := a.Srv.configStore.Set(newCfg)
-	if isAuthorizationError(err) {
+	if err == config.ReadOnlyConfigurationError {
 		return model.NewAppError("saveConfig", "ent.cluster.save_config.error", nil, err.Error(), http.StatusForbidden)
 	} else if err != nil {
 		return model.NewAppError("saveConfig", "ent.cluster.save_config.error", nil, err.Error(), http.StatusInternalServerError)
